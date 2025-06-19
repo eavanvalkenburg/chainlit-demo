@@ -1,0 +1,14 @@
+type: openai_responses
+name: WebSearchAgent
+description: Agent with web search tool, use this to gather recent information.
+instructions: >
+  Find answers to the user's questions using the provided tool. Focus on financial information, IT strategy, and Gen AI use cases.
+model:
+  id: ${OpenAI:ChatModelId}
+  connection:
+    api_key: ${OpenAI:ApiKey}
+tools:
+  - type: web_search
+    description: Search the internet for recent information.
+    options:
+      search_context_size: high

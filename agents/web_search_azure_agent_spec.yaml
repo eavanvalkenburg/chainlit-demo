@@ -1,0 +1,2 @@
+id: ${AzureAI:AgentId}
+type: foundry_agent

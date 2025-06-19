@@ -1,0 +1,15 @@
+type: chat_completion_agent
+name: CopyWriterAgent
+description: Agent that generates customer reports.
+instructions: >
+  I need a report about my customer, 
+  {{$customer}}
+  Please prepare a report on their IT strategy and especially their use of Gen AI, 
+  I'm most interested in their use of Agent and code based solutions.
+  Also include their latest financial results, in basic tables and simple terms, but no charts.
+  If there is information missing, please request it by asking for `search`, if you need code to
+  be generated and run, please ask for `code`, otherwise, if you have all the information, please respond with `finished`.
+  Additional information: {{$whiteboard}}
+model:
+  options:
+    temperature: 0.0

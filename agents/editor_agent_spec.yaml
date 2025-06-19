@@ -1,0 +1,7 @@
+type: chat_completion_agent
+name: FinalReportWriter
+description: Agent that edits and formats the final reports.
+instructions: Generate a report based on the content passed below, make sure the formatting looks nice and is in markdown.
+model:
+  options:
+    temperature: 0.0

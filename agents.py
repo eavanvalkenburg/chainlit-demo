@@ -1,104 +1,126 @@
-import os
-from pathlib import Path
+from contextlib import asynccontextmanager
+from azure.identity.aio import DefaultAzureCredential
 
 from semantic_kernel.agents import (
-    ChatCompletionAgent,
+    AgentRegistry,
+    AzureAIAgent,
+    AzureAIAgentSettings,
+    OpenAIResponsesAgent,
+    MagenticOrchestration,
+    StandardMagenticManager,
 )
-from semantic_kernel.connectors.ai.open_ai import (
-    OpenAIChatCompletion,
-    OpenAITextEmbedding,
-)
-from semantic_kernel.connectors.mcp import MCPStdioPlugin
-from semantic_kernel.core_plugins.time_plugin import TimePlugin
-from semantic_kernel.connectors.memory import ChromaCollection
-from semantic_kernel.functions import KernelPlugin
-
-from data.parse import DocsEntries
+from semantic_kernel.agents.runtime import InProcessRuntime
+from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
+from semantic_kernel.contents import ChatMessageContent
 
 
+# Define the YAML string for the sample
+web_search_agent_spec = """
+type: openai_responses
+name: WebSearchAgent
+description: Agent with web search tool, use this to gather recent information.
+instructions: >
+  Find answers to the user's questions using the provided tool.
+model:
+  id: ${OpenAI:ChatModelId}
+  connection:
+    api_key: ${OpenAI:ApiKey}
+tools:
+  - type: web_search
+    description: Search the internet for recent information.
+    options:
+      search_context_size: high
+"""
+code_agent_spec = """
+type: foundry_agent
+name: CodeInterpreterAgent
+description: Agent with code interpreter tool, use this to run code, for instance to analyze data.
+instructions: >
+  Use the code interpreter tool to answer questions that require code to be generated
+  and executed.
+model:
+  id: ${AzureAI:ChatModelId}
+  connection:
+    endpoint: ${AzureAI:Endpoint}
+tools:
+  - type: code_interpreter
+"""
+settings = AzureAIAgentSettings()  # ChatModelId & Endpoint come from env vars
+
+
+@asynccontextmanager
 async def create_agents():
-    # File Plugin
-    file_plugin = MCPStdioPlugin(
-        name="FileViewer",
-        description="File Viewer Plugin",
-        command="npx",
-        args=[
-            "-y",
-            "@modelcontextprotocol/server-filesystem",
-            "C:/Work/sk/semantic-kernel/python",
-        ],
-    )
-    await file_plugin.connect()
-    chroma: ChromaCollection[str, DocsEntries] = ChromaCollection(
-        collection_name="docs",
-        data_model_type=DocsEntries,
-        embedding_generator=OpenAITextEmbedding(),
-        persist_directory=str(Path.cwd() / "data" / "chroma"),
-    )
-    text_search = chroma.as_text_search()
-    docs_agent = ChatCompletionAgent(
-        name="DocsAgent",
-        service=OpenAIChatCompletion(),
-        plugins=[
-            KernelPlugin(
-                name="Docs",
-                functions=[
-                    text_search.create_search(
-                        function_name="DocsSearch",
-                        description="Searches the Semantic Kernel docs for relevant information",
-                        top=2,
-                        vector_property_name="embedding",
-                    )
-                ],
-            ),
-            file_plugin,
-        ],
-        instructions="You are a helpful assistant that helps with documentation related tasks. You are focused on "
-        "Microsoft Semantic Kernel and you can refer to the documentation for help. Always use that instead of trying to guess.",
-    )
+    # web search agent
+    client = OpenAIResponsesAgent.create_client()
 
-    github_plugin = MCPStdioPlugin(
-        name="Github",
-        description="Github Plugin",
-        command="C:\\Work\\github-mcp-server\\github-mcp-server.exe",
-        args=["stdio"],
-        env={"GITHUB_PERSONAL_ACCESS_TOKEN": os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN")},
+    # Create the Responses Agent from the YAML spec
+    # Note: the extras can be provided in the short-format (shown below) or
+    # in the long-format (as shown in the YAML spec, with the `OpenAI:` prefix).
+    # The short-format is used here for brevity
+    web_search_agent: OpenAIResponsesAgent = await AgentRegistry.create_from_yaml(
+        yaml_str=web_search_agent_spec,
+        client=client,
     )
-    await github_plugin.connect()
-    github_agent = ChatCompletionAgent(
-        name="GithubAgent",
-        service=OpenAIChatCompletion(),
-        plugins=[github_plugin],
-        instructions="You are a helpful assistant that helps with github related tasks. You are focused on "
-        "Microsoft Semantic Kernel and always use the `python` tag in addition to other tags if needed."
-        "Multiple tags are allowed, so use that.",
-    )
+    async with (
+        DefaultAzureCredential() as creds,
+        AzureAIAgent.create_client(credential=creds) as client,
+    ):
+        try:
+            # Create the AzureAI Agent from the YAML spec
+            # Note: the extras can be provided in the short-format (shown below) or
+            # in the long-format (as shown in the YAML spec, with the `AzureAI:` prefix).
+            # The short-format is used here for brevity
+            code_agent: AzureAIAgent = await AgentRegistry.create_from_yaml(
+                yaml_str=code_agent_spec,
+                client=client,
+                settings=settings,
+            )
 
-    # create the main agent
-    pa_agent = ChatCompletionAgent(
-        name="PersonalAssistant",
-        service=OpenAIChatCompletion(),
-        plugins=[github_agent, docs_agent, TimePlugin()],
-        instructions="You are a helpful assistant that helps me with all manner of tasks related to Semantic Kernel (or SK), you have access to your own assistants.",
-    )
-    return pa_agent
+            yield [web_search_agent, code_agent]
+
+        finally:
+            # Cleanup: Delete the thread and agent
+            if code_agent:
+                await client.agents.delete_agent(code_agent.id)
+
+
+def agent_response_callback(message: ChatMessageContent) -> None:
+    """Observer function to print the messages from the agents."""
+    print(f"\033[94m**{message.name}**\n{message.content}\033[0m")
 
 
 async def main():
     # Github Plugin and Agent
-    agent = await create_agents()
+    async with create_agents() as agents:
+        magentic_orchestration = MagenticOrchestration(
+            members=agents,
+            manager=StandardMagenticManager(
+                chat_completion_service=AzureChatCompletion()
+            ),
+            agent_response_callback=agent_response_callback,
+        )
 
-    thread = None
-    while True:
-        # ask for input
-        message = input("What do you want to ask? ")
-        if message.lower() == "exit":
-            break
+        # 2. Create a runtime and start it
+        runtime = InProcessRuntime()
+        runtime.start()
 
-        # call the pa_agent with the message
-        answer = await agent.get_response(messages=message, thread=thread)
-        print(answer.content)
-        thread = answer.thread
+        try:
+            # 3. Invoke the orchestration with a task and the runtime
+            orchestration_result = await magentic_orchestration.invoke(
+                task=(
+                    "I am preparing a report on the my customer, they a large bank based in France."
+                    "They are called Societe Generale. "
+                    "Please prepare a report on their IT strategy and especially their use of Gen AI, "
+                    "I'm most interested in their use of Agent and code based solutions."
+                    "Also include their latest financial results, in basic tables and simple terms, but no charts."
+                ),
+                runtime=runtime,
+            )
+            # 4. Wait for the results
+            value = await orchestration_result.get()
+            print(f"\033[92m\nFinal result:\n{value}\033[0m")
+        except Exception as e:
+            print(f"An error occurred during orchestration: {e}")
 
 
 if __name__ == "__main__":

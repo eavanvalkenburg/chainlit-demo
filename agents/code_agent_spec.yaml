@@ -1,0 +1,12 @@
+type: foundry_agent
+name: CodeInterpreterAgent
+description: Agent with code interpreter tool, use this to run code, for instance to analyze data.
+instructions: >
+  Use the code interpreter tool to answer questions that require code to be generated
+  and executed.
+model:
+  id: ${AzureAI:ChatModelId}
+  connection:
+    endpoint: ${AzureAI:Endpoint}
+tools:
+  - type: code_interpreter
