@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "chainlit>=2.5.5",
-    "semantic-kernel[azure,mcp,ollama,chroma] @ git+https://github.com/eavanvalkenburg/semantic-kernel@hybrid_search#subdirectory=python",
+    "semantic-kernel[azure,mcp,ollama,chroma] @ C:\\Work\\sk\\semantic-kernel\\python",
 ]
 
 [tool.uv]

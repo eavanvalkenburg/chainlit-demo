@@ -8,6 +8,7 @@ from semantic_kernel.connectors.ai.open_ai import (
     OpenAIChatCompletion,
     OpenAITextEmbedding,
 )
+from semantic_kernel.connectors.ai.ollama import OllamaChatCompletion
 from semantic_kernel.connectors.mcp import MCPStdioPlugin
 from semantic_kernel.core_plugins.time_plugin import TimePlugin
 from semantic_kernel.connectors.memory import ChromaCollection
@@ -36,20 +37,19 @@ async def create_agents():
         persist_directory=str(Path.cwd() / "data" / "chroma"),
     )
     text_search = chroma.as_text_search()
+    func = text_search.create_search(
+        function_name="DocsSearch",
+        description="Searches the Semantic Kernel docs for relevant information",
+        top=2,
+        vector_property_name="embedding",
+    )
     docs_agent = ChatCompletionAgent(
         name="DocsAgent",
-        service=OpenAIChatCompletion(),
+        service=OllamaChatCompletion(),
         plugins=[
             KernelPlugin(
                 name="Docs",
-                functions=[
-                    text_search.create_search(
-                        function_name="DocsSearch",
-                        description="Searches the Semantic Kernel docs for relevant information",
-                        top=2,
-                        vector_property_name="embedding",
-                    )
-                ],
+                functions=[func],
             ),
             file_plugin,
         ],
@@ -89,9 +89,14 @@ async def main():
     agent = await create_agents()
 
     thread = None
+    first = True
+    message = "how do the docs define Process Framework?"
     while True:
         # ask for input
-        message = input("What do you want to ask? ")
+        if first:
+            first = False
+        else:
+            message = input("What do you want to ask? ")
         if message.lower() == "exit":
             break
 
